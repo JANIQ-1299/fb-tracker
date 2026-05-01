@@ -3,49 +3,52 @@ const app = express();
 
 app.use(express.json());
 
-const VERIFY_TOKEN = "123";
+// ✅ التوكن لازم يكون نفسه في Meta
+const VERIFY_TOKEN = "my_verify_token";
 
-let users = {}; // تخزين مصدر الزبون
+// 🧠 تخزين مؤقت لمصدر الزبون (الإعلان)
+let users = {};
 
-// تحقق Webhook
+// 🔗 التحقق من Webhook (مهم جداً)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ Webhook verified");
     return res.status(200).send(challenge);
+  } else {
+    console.log("❌ Verification failed");
+    return res.sendStatus(403);
   }
-  res.sendStatus(403);
 });
 
-// استقبال الرسائل
+// 📩 استقبال الرسائل من Messenger
 app.post("/webhook", (req, res) => {
   const body = req.body;
 
   if (body.object === "page") {
-    body.entry.forEach(entry => {
-      entry.messaging?.forEach(event => {
+    body.entry.forEach((entry) => {
+      entry.messaging.forEach((event) => {
+        const sender = event.sender.id;
 
-        const sender = event.sender?.id;
-
-        // 🔥 حفظ مصدر الإعلان
+        // 🔥 حفظ مصدر الإعلان (الفيديو/الحملة)
         if (event.referral) {
           users[sender] = {
             source: event.referral.ref || "اعلان",
-            ad_id: event.referral.ad_id || "غير معروف"
+            ad_id: event.referral.ad_id || "غير معروف",
           };
 
-          console.log("📥 زبون جديد من اعلان:", users[sender]);
+          console.log("🎯 زبون جاء من إعلان:", users[sender]);
         }
 
-        // 🔥 عند تم الحجز
-        if (event.message?.text?.includes("تم الحجز")) {
+        // 🔥 عند كتابة "تم الحجز"
+        if (event.message && event.message.text?.includes("تم الحجز")) {
           const userData = users[sender];
 
           console.log("🔥 تم الحجز من:", userData);
         }
-
       });
     });
 
@@ -55,11 +58,8 @@ app.post("/webhook", (req, res) => {
   res.sendStatus(404);
 });
 
-// عرض النتائج
-app.get("/results", (req, res) => {
-  res.json(users);
-});
-
-app.listen(3000, () => {
-  console.log("Server running...");
+// 🚀 تشغيل السيرفر
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("🚀 Server running on port " + PORT);
 });
