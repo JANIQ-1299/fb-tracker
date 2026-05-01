@@ -3,51 +3,51 @@ const app = express();
 
 app.use(express.json());
 
-// ✅ التوكن لازم يكون نفسه في Meta
 const VERIFY_TOKEN = "my_verify_token";
+const users = {};
 
-// 🧠 تخزين مؤقت لمصدر الزبون (الإعلان)
-let users = {};
+app.get("/", (req, res) => {
+  res.send("FB Tracker is running");
+});
 
-// 🔗 التحقق من Webhook (مهم جداً)
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
     return res.status(200).send(challenge);
-  } else {
-    console.log("❌ Verification failed");
-    return res.sendStatus(403);
   }
+
+  return res.sendStatus(403);
 });
 
-// 📩 استقبال الرسائل من Messenger
 app.post("/webhook", (req, res) => {
   const body = req.body;
 
   if (body.object === "page") {
-    body.entry.forEach((entry) => {
-      entry.messaging.forEach((event) => {
-        const sender = event.sender.id;
+    body.entry?.forEach((entry) => {
+      entry.messaging?.forEach((event) => {
+        const sender = event.sender?.id;
 
-        // 🔥 حفظ مصدر الإعلان (الفيديو/الحملة)
+        if (!sender) return;
+
         if (event.referral) {
           users[sender] = {
-            source: event.referral.ref || "اعلان",
-            ad_id: event.referral.ad_id || "غير معروف",
+            ref: event.referral.ref || "unknown",
+            ad_id: event.referral.ad_id || "unknown",
+            created_at: new Date().toISOString()
           };
-
-          console.log("🎯 زبون جاء من إعلان:", users[sender]);
         }
 
-        // 🔥 عند كتابة "تم الحجز"
-        if (event.message && event.message.text?.includes("تم الحجز")) {
-          const userData = users[sender];
+        const text = event.message?.text || "";
 
-          console.log("🔥 تم الحجز من:", userData);
+        if (text.includes("تم الحجز")) {
+          console.log("BOOKING:", {
+            sender,
+            source: users[sender] || null,
+            text
+          });
         }
       });
     });
@@ -55,11 +55,14 @@ app.post("/webhook", (req, res) => {
     return res.sendStatus(200);
   }
 
-  res.sendStatus(404);
+  return res.sendStatus(404);
 });
 
-// 🚀 تشغيل السيرفر
+app.get("/results", (req, res) => {
+  res.json(users);
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("🚀 Server running on port " + PORT);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
