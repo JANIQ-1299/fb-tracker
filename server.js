@@ -7,7 +7,7 @@ const VERIFY_TOKEN = "my_verify_token";
 const users = {};
 
 app.get("/", (req, res) => {
-  res.send("FB Tracker is running");
+  res.status(200).send("FB Tracker is running");
 });
 
 app.get("/webhook", (req, res) => {
@@ -19,7 +19,7 @@ app.get("/webhook", (req, res) => {
     return res.status(200).send(challenge);
   }
 
-  return res.sendStatus(403);
+  return res.status(403).send("Forbidden");
 });
 
 app.post("/webhook", (req, res) => {
@@ -28,7 +28,7 @@ app.post("/webhook", (req, res) => {
   if (body.object === "page") {
     body.entry?.forEach((entry) => {
       entry.messaging?.forEach((event) => {
-        const sender = event.sender?.id;
+        const sender = event.sender?.id || event.recipient?.id;
         if (!sender) return;
 
         if (event.referral) {
@@ -38,7 +38,7 @@ app.post("/webhook", (req, res) => {
             time: new Date().toISOString()
           };
 
-          console.log("Source:", users[sender]);
+          console.log("SOURCE:", users[sender]);
         }
 
         const text = event.message?.text || "";
@@ -47,13 +47,14 @@ app.post("/webhook", (req, res) => {
           console.log("BOOKING:", {
             sender,
             source: users[sender] || null,
-            text
+            text,
+            time: new Date().toISOString()
           });
         }
       });
     });
 
-    return res.sendStatus(200);
+    return res.status(200).send("EVENT_RECEIVED");
   }
 
   return res.sendStatus(404);
@@ -63,7 +64,7 @@ app.get("/results", (req, res) => {
   res.json(users);
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port " + PORT);
