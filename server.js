@@ -7,7 +7,6 @@ app.use(express.json());
 
 const VERIFY_TOKEN = "my_verify_token";
 
-// ✅ التوكن جاهز (لا تشاركه مرة ثانية)
 const PAGE_TOKEN = "EAAjDyjJrkvYBRWvOcB2WcAIesLpqax8nHHcVqHSL90KINZAXB1dDReszCtfROM3xPa5lye45BXfsvzqDincYvNRhnRwrVJ7ZBMHJAeN2NqBMU407Vn493pkyctGDZBmEUgUM2TqOrTq5Y8vTsAgRu4o77qFr0AJyifmhVydbEJj3VZC4dFqD5f8b7ZCtrKZAiZAvJ4EXwZDZD";
 
 const DB_FILE = "./db.json";
@@ -23,12 +22,10 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
 }
 
-// الصفحة الرئيسية
 app.get("/", (req, res) => {
   res.send("FB Tracker is running");
 });
 
-// التحقق من webhook
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -41,7 +38,6 @@ app.get("/webhook", (req, res) => {
   return res.status(403).send("Forbidden");
 });
 
-// استقبال الأحداث من فيسبوك
 app.post("/webhook", (req, res) => {
   const db = loadDB();
   const body = req.body;
@@ -52,14 +48,15 @@ app.post("/webhook", (req, res) => {
         const sender = event.sender?.id;
         if (!sender) return;
 
-        // حفظ مصدر الإعلان
         if (event.referral) {
           db.users[sender] = {
             ref: event.referral.ref || "unknown",
             ad_id: event.referral.ad_id || "unknown",
             time: new Date().toISOString()
           };
+
           saveDB(db);
+          console.log("SOURCE SAVED:", db.users[sender]);
         }
       });
     });
@@ -70,7 +67,6 @@ app.post("/webhook", (req, res) => {
   return res.sendStatus(404);
 });
 
-// 🔥 فحص الرسائل (حتى رسائلك أنت)
 app.get("/check", async (req, res) => {
   try {
     const db = loadDB();
@@ -95,13 +91,22 @@ app.get("/check", async (req, res) => {
           const exists = db.bookings.find((b) => b.message_id === msg.id);
           if (exists) continue;
 
+          const userId = msg.from?.id;
+
+          let source = "غير معروف";
+
+          if (userId && db.users[userId]) {
+            source = db.users[userId].ref || db.users[userId].ad_id || "غير معروف";
+          }
+
           const booking = {
             message_id: msg.id,
             conversation_id: convo.id,
             text,
             from: msg.from?.name || "unknown",
+            user_id: userId || "unknown",
             time: msg.created_time,
-            source: "غير معروف"
+            source
           };
 
           db.bookings.push(booking);
@@ -119,7 +124,6 @@ app.get("/check", async (req, res) => {
   }
 });
 
-// صفحة عرض النتائج
 app.get("/results", (req, res) => {
   const db = loadDB();
 
