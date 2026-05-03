@@ -7,7 +7,14 @@ app.use(express.json());
 
 const VERIFY_TOKEN = "my_verify_token";
 
+// 🔴 ضع توكن الصفحة هنا
 const PAGE_TOKEN = "EAAjDyjJrkvYBReRjj3KTZCOeyGT7ZADe6y81WXdlpMlBfLTUqGuupZCh052OmQCpqvY2wpseLLgOOBaNLUhRZBPwlYZAx2bOA2IvFmaxviFAC3wtWsyOxDdpc4RiqL1BYrZBdigk9Ev2hHqqEgeIg0ZAx9yO4HJNB24NN2QfgNnrVPiXhypev2zga0G3mvVlJ3IYbuZB6AZDZD";
+
+// 🔴 ضع توكن الإعلانات هنا
+const ADS_TOKEN = "EAAjDyjJrkvYBRVZAYAtdIudfMh7hDZBJVRHTv8GK9c8NPPpoYxSFNFZBE5rFzemN3XwyrBIIXvQ6kWH7fw1m6iE0i9rwxLyZCTkm8jFwN3O25HhKzYxqhd75ABlEEWkgQ8ZATPXa8wsnMLfHeg3rUHwLK3ReYqggOrZBTvyZC4oHDvgfJjsTCFEov1w29aJ1wZDZD";
+
+// 🔴 حسابك الإعلاني
+const AD_ACCOUNT_ID = "act_1639079020410757";
 
 const DB_FILE = "./db.json";
 
@@ -22,197 +29,139 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
 }
 
-app.get("/", (req, res) => {
-  res.send("FB Tracker is running");
-});
-
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-
-  return res.status(403).send("Forbidden");
-});
-
+// استقبال webhook
 app.post("/webhook", (req, res) => {
   const db = loadDB();
   const body = req.body;
 
   if (body.object === "page") {
-    body.entry?.forEach((entry) => {
-      entry.messaging?.forEach((event) => {
+    body.entry?.forEach(entry => {
+      entry.messaging?.forEach(event => {
         const sender = event.sender?.id;
+
         if (!sender) return;
 
         if (event.referral) {
           db.users[sender] = {
-            ref: event.referral.ref || "unknown",
-            ad_id: event.referral.ad_id || "unknown",
-            time: new Date().toISOString()
+            ad_id: event.referral.ad_id || "unknown"
           };
-
           saveDB(db);
-          console.log("SOURCE SAVED:", db.users[sender]);
         }
       });
     });
 
-    return res.status(200).send("EVENT_RECEIVED");
+    return res.status(200).send("OK");
   }
 
-  return res.sendStatus(404);
+  res.sendStatus(404);
 });
 
+// فحص الرسائل
 app.get("/check", async (req, res) => {
   try {
     const db = loadDB();
 
     const convRes = await axios.get(
-      `https://graph.facebook.com/v18.0/me/conversations?fields=id,participants&access_token=${PAGE_TOKEN}`
+      `https://graph.facebook.com/v18.0/me/conversations?fields=id&access_token=${PAGE_TOKEN}`
     );
 
-    const conversations = convRes.data.data || [];
-
-    for (const convo of conversations) {
+    for (const convo of convRes.data.data || []) {
       const msgRes = await axios.get(
-        `https://graph.facebook.com/v18.0/${convo.id}/messages?fields=message,from,created_time,id&limit=10&access_token=${PAGE_TOKEN}`
+        `https://graph.facebook.com/v18.0/${convo.id}/messages?fields=message,from,created_time,id&limit=20&access_token=${PAGE_TOKEN}`
       );
 
-      const messages = msgRes.data.data || [];
+      for (const msg of msgRes.data.data || []) {
+        if ((msg.message || "").includes("تم الحجز")) {
 
-      for (const msg of messages) {
-        const text = msg.message || "";
-
-        if (text.includes("تم الحجز")) {
-          const exists = db.bookings.find((b) => b.message_id === msg.id);
-          if (exists) continue;
+          if (db.bookings.find(b => b.message_id === msg.id)) continue;
 
           const userId = msg.from?.id;
-          const userData = userId ? db.users[userId] : null;
+          const userData = db.users[userId] || {};
 
-          const adId = userData?.ad_id || "unknown";
-          const source = userData?.ref || adId || "unknown";
-
-          const booking = {
+          db.bookings.push({
             message_id: msg.id,
-            conversation_id: convo.id,
-            text,
-            from: msg.from?.name || "unknown",
-            user_id: userId || "unknown",
             time: msg.created_time,
-            ad_id: adId,
-            source
-          };
+            ad_id: userData.ad_id || "unknown"
+          });
 
-          db.bookings.push(booking);
           saveDB(db);
-
-          console.log("🔥 NEW BOOKING:", booking);
         }
       }
     }
 
-    res.redirect("/results");
+    res.redirect("/report");
+
   } catch (err) {
-    console.log(err.response?.data || err.message);
-    res.send("Error checking messages");
+    console.log(err.message);
+    res.send("Error");
   }
 });
 
-app.get("/results", (req, res) => {
-  const db = loadDB();
+// تقرير احترافي
+app.get("/report", async (req, res) => {
+  try {
+    const db = loadDB();
 
-  const summary = {};
+    const adsRes = await axios.get(
+      `https://graph.facebook.com/v18.0/${AD_ACCOUNT_ID}/insights?fields=ad_id,ad_name,campaign_name,spend&access_token=${ADS_TOKEN}`
+    );
 
-  db.bookings.forEach((b) => {
-    const date = b.time ? new Date(b.time).toISOString().split("T")[0] : "unknown";
-    const ad = b.ad_id || "unknown";
+    const stats = {};
 
-    if (!summary[date]) summary[date] = {};
-    if (!summary[date][ad]) summary[date][ad] = 0;
+    db.bookings.forEach(b => {
+      if (!stats[b.ad_id]) stats[b.ad_id] = { bookings: 0 };
+      stats[b.ad_id].bookings++;
+    });
 
-    summary[date][ad]++;
-  });
+    (adsRes.data.data || []).forEach(ad => {
+      if (!stats[ad.ad_id]) stats[ad.ad_id] = { bookings: 0 };
 
-  let summaryRows = "";
+      stats[ad.ad_id].name = ad.ad_name;
+      stats[ad.ad_id].campaign = ad.campaign_name;
+      stats[ad.ad_id].spend = parseFloat(ad.spend || 0);
+    });
 
-  Object.keys(summary).sort().reverse().forEach((date) => {
-    Object.keys(summary[date]).forEach((ad) => {
-      summaryRows += `
+    let rows = "";
+
+    for (const ad in stats) {
+      const s = stats[ad];
+      const cpa = s.bookings ? (s.spend / s.bookings).toFixed(2) : 0;
+
+      rows += `
         <tr>
-          <td>${date}</td>
           <td>${ad}</td>
-          <td>${summary[date][ad]}</td>
+          <td>${s.name || "unknown"}</td>
+          <td>${s.campaign || "unknown"}</td>
+          <td>${s.bookings}</td>
+          <td>${s.spend || 0}</td>
+          <td>${cpa}</td>
         </tr>
       `;
-    });
-  });
+    }
 
-  let rows = db.bookings.slice().reverse().map((b, i) => `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${b.time || ""}</td>
-      <td>${b.from || ""}</td>
-      <td>${b.text || ""}</td>
-      <td>${b.ad_id || "unknown"}</td>
-      <td>${b.source || "unknown"}</td>
-      <td>${b.conversation_id || ""}</td>
-    </tr>
-  `).join("");
+    res.send(`
+      <html dir="rtl">
+      <body style="background:#111;color:#fff;font-family:Arial;padding:20px;">
+        <h2>📊 تقرير الإعلانات</h2>
+        <table border="1" style="width:100%;text-align:center;">
+          <tr>
+            <th>Ad ID</th>
+            <th>اسم الإعلان</th>
+            <th>الحملة</th>
+            <th>الحجوزات</th>
+            <th>الصرف</th>
+            <th>CPA</th>
+          </tr>
+          ${rows}
+        </table>
+      </body>
+      </html>
+    `);
 
-  res.send(`
-    <html dir="rtl">
-    <head>
-      <meta charset="UTF-8" />
-      <title>نتائج الحجوزات</title>
-      <style>
-        body { font-family: Arial; background:#111; color:#fff; padding:30px; }
-        h1, h2, h3 { margin: 10px 0; }
-        table { width:100%; border-collapse: collapse; margin-top:20px; margin-bottom:35px; }
-        th, td { border:1px solid #444; padding:10px; text-align:center; }
-        th { background:#222; }
-        a { background:#0d6efd; color:#fff; padding:10px 15px; text-decoration:none; border-radius:6px; display:inline-block; }
-      </style>
-    </head>
-    <body>
-      <h1>📊 نتائج الحجوزات</h1>
-      <a href="/check">تحديث النتائج</a>
-      <h3>عدد الحجوزات: ${db.bookings.length}</h3>
-
-      <h2>📈 إحصائيات يومية حسب الإعلان</h2>
-      <table>
-        <tr>
-          <th>التاريخ</th>
-          <th>Ad ID</th>
-          <th>عدد الحجوزات</th>
-        </tr>
-        ${summaryRows}
-      </table>
-
-      <h2>📩 جميع الحجوزات</h2>
-      <table>
-        <tr>
-          <th>#</th>
-          <th>الوقت</th>
-          <th>المرسل</th>
-          <th>النص</th>
-          <th>Ad ID</th>
-          <th>المصدر / الفيديو</th>
-          <th>المحادثة</th>
-        </tr>
-        ${rows}
-      </table>
-    </body>
-    </html>
-  `);
+  } catch (err) {
+    console.log(err.message);
+    res.send("Error");
+  }
 });
 
-const PORT = process.env.PORT || 8080;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on port " + PORT);
-});
+app.listen(8080, () => console.log("Server running"));
