@@ -7,7 +7,7 @@ app.use(express.json());
 
 const VERIFY_TOKEN = "my_verify_token";
 
-const PAGE_TOKEN = "EAAjDyjJrkvYBRWvOcB2WcAIesLpqax8nHHcVqHSL90KINZAXB1dDReszCtfROM3xPa5lye45BXfsvzqDincYvNRhnRwrVJ7ZBMHJAeN2NqBMU407Vn493pkyctGDZBmEUgUM2TqOrTq5Y8vTsAgRu4o77qFr0AJyifmhVydbEJj3VZC4dFqD5f8b7ZCtrKZAiZAvJ4EXwZDZD";
+const PAGE_TOKEN = "EAAjDyjJrkvYBReRjj3KTZCOeyGT7ZADe6y81WXdlpMlBfLTUqGuupZCh052OmQCpqvY2wpseLLgOOBaNLUhRZBPwlYZAx2bOA2IvFmaxviFAC3wtWsyOxDdpc4RiqL1BYrZBdigk9Ev2hHqqEgeIg0ZAx9yO4HJNB24NN2QfgNnrVPiXhypev2zga0G3mvVlJ3IYbuZB6AZDZD";
 
 const DB_FILE = "./db.json";
 
@@ -92,12 +92,10 @@ app.get("/check", async (req, res) => {
           if (exists) continue;
 
           const userId = msg.from?.id;
+          const userData = userId ? db.users[userId] : null;
 
-          let source = "غير معروف";
-
-          if (userId && db.users[userId]) {
-            source = db.users[userId].ref || db.users[userId].ad_id || "غير معروف";
-          }
+          const adId = userData?.ad_id || "unknown";
+          const source = userData?.ref || adId || "unknown";
 
           const booking = {
             message_id: msg.id,
@@ -106,6 +104,7 @@ app.get("/check", async (req, res) => {
             from: msg.from?.name || "unknown",
             user_id: userId || "unknown",
             time: msg.created_time,
+            ad_id: adId,
             source
           };
 
@@ -127,13 +126,40 @@ app.get("/check", async (req, res) => {
 app.get("/results", (req, res) => {
   const db = loadDB();
 
-  let rows = db.bookings.map((b, i) => `
+  const summary = {};
+
+  db.bookings.forEach((b) => {
+    const date = b.time ? new Date(b.time).toISOString().split("T")[0] : "unknown";
+    const ad = b.ad_id || "unknown";
+
+    if (!summary[date]) summary[date] = {};
+    if (!summary[date][ad]) summary[date][ad] = 0;
+
+    summary[date][ad]++;
+  });
+
+  let summaryRows = "";
+
+  Object.keys(summary).sort().reverse().forEach((date) => {
+    Object.keys(summary[date]).forEach((ad) => {
+      summaryRows += `
+        <tr>
+          <td>${date}</td>
+          <td>${ad}</td>
+          <td>${summary[date][ad]}</td>
+        </tr>
+      `;
+    });
+  });
+
+  let rows = db.bookings.slice().reverse().map((b, i) => `
     <tr>
       <td>${i + 1}</td>
       <td>${b.time || ""}</td>
       <td>${b.from || ""}</td>
       <td>${b.text || ""}</td>
-      <td>${b.source || "غير معروف"}</td>
+      <td>${b.ad_id || "unknown"}</td>
+      <td>${b.source || "unknown"}</td>
       <td>${b.conversation_id || ""}</td>
     </tr>
   `).join("");
@@ -145,22 +171,36 @@ app.get("/results", (req, res) => {
       <title>نتائج الحجوزات</title>
       <style>
         body { font-family: Arial; background:#111; color:#fff; padding:30px; }
-        table { width:100%; border-collapse: collapse; margin-top:20px; }
-        th, td { border:1px solid #444; padding:10px; }
+        h1, h2, h3 { margin: 10px 0; }
+        table { width:100%; border-collapse: collapse; margin-top:20px; margin-bottom:35px; }
+        th, td { border:1px solid #444; padding:10px; text-align:center; }
         th { background:#222; }
-        a { background:#0d6efd; color:#fff; padding:10px 15px; text-decoration:none; border-radius:6px; }
+        a { background:#0d6efd; color:#fff; padding:10px 15px; text-decoration:none; border-radius:6px; display:inline-block; }
       </style>
     </head>
     <body>
       <h1>📊 نتائج الحجوزات</h1>
       <a href="/check">تحديث النتائج</a>
       <h3>عدد الحجوزات: ${db.bookings.length}</h3>
+
+      <h2>📈 إحصائيات يومية حسب الإعلان</h2>
+      <table>
+        <tr>
+          <th>التاريخ</th>
+          <th>Ad ID</th>
+          <th>عدد الحجوزات</th>
+        </tr>
+        ${summaryRows}
+      </table>
+
+      <h2>📩 جميع الحجوزات</h2>
       <table>
         <tr>
           <th>#</th>
           <th>الوقت</th>
           <th>المرسل</th>
           <th>النص</th>
+          <th>Ad ID</th>
           <th>المصدر / الفيديو</th>
           <th>المحادثة</th>
         </tr>
